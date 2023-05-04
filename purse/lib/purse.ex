@@ -21,7 +21,7 @@ defmodule Purse do
     |> Enum.all?(fn key -> is_atom(key) end) and
       map
       |> Map.values()
-      |> Enum.all?(fn value -> is_number(value) end)
+      |> Enum.all?(fn value -> is_number(value) and value >= 0 end)
   end
 
   # Does not work if loop is private for some reason
@@ -44,8 +44,23 @@ defmodule Purse do
 
         {:withdraw, currency, amount, sender_pid, ref} ->
           temp = -amount
-          res = change_state(state, currency, temp)
-          send(sender_pid, ref)
+
+          res =
+            cond do
+              state[currency] == nil ->
+                send(sender_pid, {:error_currency, ref})
+                state
+
+              state[currency] >= amount ->
+                temp = change_state(state, currency, temp)
+                send(sender_pid, ref)
+                temp
+
+              true ->
+                send(sender_pid, {:error_amount, ref})
+                state
+            end
+
           res
       end
 
@@ -104,7 +119,7 @@ defmodule Purse do
   end
 
   def deposit(pid, currency, amount)
-      when is_pid(pid) and is_atom(currency) and is_number(amount) do
+      when is_pid(pid) and is_atom(currency) and is_number(amount) and amount >= 0 do
     if Process.alive?(pid) do
       ref = make_ref()
       send(pid, {:deposit, currency, amount, self(), ref})
@@ -123,13 +138,15 @@ defmodule Purse do
   end
 
   def withdraw(pid, currency, amount)
-      when is_pid(pid) and is_atom(currency) and is_number(amount) do
+      when is_pid(pid) and is_atom(currency) and is_number(amount) and amount >= 0 do
     if Process.alive?(pid) do
       ref = make_ref()
       send(pid, {:withdraw, currency, amount, self(), ref})
 
       receive do
         ^ref -> {:ok, "Success"}
+        {:error_currency, ^ref} -> {:error, "No such currency"}
+        {:error_amount, ^ref} -> {:error, "Not enough money"}
         _ -> {:error, "Returned reference in not equal to the initial one"}
       end
     else
